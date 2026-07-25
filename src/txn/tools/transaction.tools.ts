@@ -1,4 +1,4 @@
-import { Injectable, ToolDecorator as Tool, UseGuards, Widget, Cache, emitEvent, z } from '@nitrostack/core';
+import { Injectable, ToolDecorator as Tool, UseGuards, UseFilters, Widget, Cache, emitEvent, z } from '@nitrostack/core';
 import type { ExecutionContext } from '@nitrostack/core';
 import { TransactionService } from '../services/transaction.service.js';
 import { JournalService } from '../services/journal.service.js';
@@ -8,6 +8,7 @@ import { CompensatorRegistry } from '../services/registry.service.js';
 import { TransactionContext } from '../services/transaction-context.service.js';
 import { ApiKeyGuard } from '../guards/api-key.guard.js';
 import { RollbackGuard } from '../guards/rollback.guard.js';
+import { TxnExceptionFilter } from '../filters/txn-exception.filter.js';
 
 const BeginTransactionSchema = z.object({
   label: z.string().min(3).describe('Human-readable intent, e.g. "onboard acme-corp". Appears in the audit trail.'),
@@ -72,6 +73,7 @@ export class TransactionTools {
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
   })
   @UseGuards(ApiKeyGuard)
+  @UseFilters(TxnExceptionFilter)
   async begin(input: z.infer<typeof BeginTransactionSchema>, ctx: ExecutionContext) {
     const txn = this.txns.open({
       label: input.label,
@@ -110,6 +112,7 @@ export class TransactionTools {
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
   })
   @Widget('txn-timeline')
+  @UseFilters(TxnExceptionFilter)
   async get(input: z.infer<typeof GetTransactionSchema>) {
     const txn = this.txns.get(input.transactionId);
     const steps = input.includeJournal ? this.journal.steps(input.transactionId) : [];
@@ -129,6 +132,7 @@ export class TransactionTools {
   })
   @UseGuards(ApiKeyGuard, RollbackGuard)
   @Widget('txn-timeline')
+  @UseFilters(TxnExceptionFilter)
   async rollback(input: z.infer<typeof RollbackTransactionSchema>, ctx: ExecutionContext) {
     return this.rollbacks.run(input.transactionId, {
       conflictPolicy: input.conflictPolicy,
@@ -148,6 +152,7 @@ export class TransactionTools {
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
   })
   @UseGuards(ApiKeyGuard)
+  @UseFilters(TxnExceptionFilter)
   async commit(input: z.infer<typeof CommitTransactionSchema>, ctx: ExecutionContext) {
     const txn = this.txns.commit(input.transactionId);
     emitEvent('txn.committed', { txnId: input.transactionId });

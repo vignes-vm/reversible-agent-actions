@@ -1,8 +1,10 @@
 import { Injectable, ToolDecorator as Tool, UseInterceptors, UsePipes, z } from '@nitrostack/core';
+import type { OnModuleInit } from '@nitrostack/core';
 import { ulid } from 'ulid';
 import { Compensatable } from '../../txn/decorators/compensatable.decorator.js';
 import { JournalInterceptor } from '../../txn/interceptors/journal.interceptor.js';
 import { JournalCapturePipe } from '../../txn/pipes/journal-capture.pipe.js';
+import { CompensatorRegistry } from '../../txn/services/registry.service.js';
 
 interface Authorization {
   authId: string;
@@ -38,11 +40,18 @@ const IssuePayoutSchema = z.object({ accountId: z.string(), amount: z.number().p
 const ListChargesSchema = z.object({});
 
 /** In-memory billing target server: authorizations, charges, and payouts. */
-@Injectable()
-export class BillingTools {
+@Injectable({ deps: [CompensatorRegistry] })
+export class BillingTools implements OnModuleInit {
   private readonly authorizations = new Map<string, Authorization>();
   private readonly charges = new Map<string, Charge>();
   private readonly payouts = new Map<string, Payout>();
+
+  constructor(private readonly registry: CompensatorRegistry) {}
+
+  /** See CrmTools.onModuleInit for why this can't live in a module constructor. */
+  onModuleInit(): void {
+    this.registry.registerFromClass(this.constructor);
+  }
 
   @Tool({
     name: 'authorize_payment',

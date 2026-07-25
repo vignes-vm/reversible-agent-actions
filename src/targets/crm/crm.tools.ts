@@ -1,8 +1,10 @@
 import { Injectable, ToolDecorator as Tool, UseInterceptors, UsePipes, z } from '@nitrostack/core';
+import type { OnModuleInit } from '@nitrostack/core';
 import { ulid } from 'ulid';
 import { Compensatable } from '../../txn/decorators/compensatable.decorator.js';
 import { JournalInterceptor } from '../../txn/interceptors/journal.interceptor.js';
 import { JournalCapturePipe } from '../../txn/pipes/journal-capture.pipe.js';
+import { CompensatorRegistry } from '../../txn/services/registry.service.js';
 
 type Tier = 'basic' | 'premium' | 'enterprise';
 
@@ -32,10 +34,23 @@ const GetAccountSchema = z.object({ accountId: z.string() });
 const ListAccountsSchema = z.object({});
 
 /** In-memory CRM target server: accounts and API keys, with compensator specs for each write. */
-@Injectable()
-export class CrmTools {
+@Injectable({ deps: [CompensatorRegistry] })
+export class CrmTools implements OnModuleInit {
   private readonly accounts = new Map<string, Account>();
   private readonly apiKeys = new Map<string, ApiKey>();
+
+  constructor(private readonly registry: CompensatorRegistry) {}
+
+  /**
+   * @nitrostack/core never instantiates @Module-decorated classes (only their
+   * static metadata is read), so a module constructor can't perform this
+   * registration. onModuleInit does run, but only if the bootstrap explicitly
+   * calls triggerLifecycleHook(...) after McpApplicationFactory.create() — see
+   * src/main.ts.
+   */
+  onModuleInit(): void {
+    this.registry.registerFromClass(this.constructor);
+  }
 
   @Tool({
     name: 'create_account',

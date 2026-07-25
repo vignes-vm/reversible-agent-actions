@@ -1,8 +1,10 @@
 import { Injectable, ToolDecorator as Tool, UseInterceptors, UsePipes, z } from '@nitrostack/core';
+import type { OnModuleInit } from '@nitrostack/core';
 import { ulid } from 'ulid';
 import { Compensatable } from '../../txn/decorators/compensatable.decorator.js';
 import { JournalInterceptor } from '../../txn/interceptors/journal.interceptor.js';
 import { JournalCapturePipe } from '../../txn/pipes/journal-capture.pipe.js';
+import { CompensatorRegistry } from '../../txn/services/registry.service.js';
 
 interface Message {
   id: string;
@@ -28,11 +30,18 @@ const RevokeInviteSchema = z.object({ inviteId: z.string() });
 const ListMessagesSchema = z.object({ channel: z.string() });
 
 /** In-memory messaging target server: channels/messages and invites, with compensator specs. */
-@Injectable()
-export class MessagingTools {
+@Injectable({ deps: [CompensatorRegistry] })
+export class MessagingTools implements OnModuleInit {
   private readonly channels = new Map<string, Message[]>();
   private readonly messagesById = new Map<string, Message>();
   private readonly invites = new Map<string, Invite>();
+
+  constructor(private readonly registry: CompensatorRegistry) {}
+
+  /** See CrmTools.onModuleInit for why this can't live in a module constructor. */
+  onModuleInit(): void {
+    this.registry.registerFromClass(this.constructor);
+  }
 
   @Tool({
     name: 'post_message',
