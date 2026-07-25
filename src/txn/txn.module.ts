@@ -1,5 +1,6 @@
 import { Module } from '@nitrostack/core';
 import { TransactionTools } from './tools/transaction.tools.js';
+import { HealthTools } from './tools/health.tools.js';
 import { RegistryResources } from './resources/registry.resources.js';
 import { PlanningPrompts } from './prompts/planning.prompts.js';
 import { JournalService } from './services/journal.service.js';
@@ -10,6 +11,7 @@ import { RollbackOrchestrator } from './services/rollback.service.js';
 import { PreflightPlanner } from './services/preflight.service.js';
 import { TxnAuditListener } from './services/audit.service.js';
 import { TransactionContext } from './services/transaction-context.service.js';
+import { ServerInfo } from './services/server-info.service.js';
 
 /**
  * @nitrostack/core's ModuleMetadata has no `interceptors`/`filters` keys — those
@@ -25,7 +27,7 @@ import { TransactionContext } from './services/transaction-context.service.js';
 @Module({
   name: 'txn',
   description: 'Reversible transaction boundary for MCP agent tool calls',
-  controllers: [TransactionTools, RegistryResources, PlanningPrompts],
+  controllers: [TransactionTools, HealthTools, RegistryResources, PlanningPrompts],
   providers: [
     JournalService,
     TransactionService,
@@ -35,6 +37,7 @@ import { TransactionContext } from './services/transaction-context.service.js';
     PreflightPlanner,
     TxnAuditListener,
     TransactionContext,
+    ServerInfo,
   ],
   exports: [CompensatorRegistry, JournalService],
 })

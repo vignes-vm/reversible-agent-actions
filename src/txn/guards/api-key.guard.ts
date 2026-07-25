@@ -3,15 +3,24 @@ import type { ExecutionContext, Guard } from '@nitrostack/core';
 import { TxnError } from '../services/txn-error.js';
 
 /**
- * Requires the request to have already been authenticated by the API key
- * middleware (wired at bootstrap via ApiKeyModule.forRoot(...)), which populates
- * context.auth. This guard only checks that authentication happened — it does
- * not itself validate keys.
+ * Validates an API key passed via MCP request `_meta` (which IS forwarded
+ * into ctx.metadata — confirmed in server.js's tool-call handler) against
+ * process.env.API_KEY.
+ *
+ * ctx.auth is never populated by @nitrostack/core for any transport — there
+ * is no framework-level request-authentication middleware wired into the MCP
+ * tool-execution pipeline (checked: zero references to `.auth` in server.js).
+ * An earlier version of this guard checked ctx.auth?.subject, which meant it
+ * rejected every call unconditionally, authenticated or not. Callers must
+ * pass `_meta: { apiKey }` alongside their normal tool arguments for this
+ * guard to see it — same mechanism RollbackGuard uses for transactionId.
  */
 @Injectable()
 export class ApiKeyGuard implements Guard {
   canActivate(context: ExecutionContext): boolean {
-    if (!context.auth?.subject) {
+    const key = context.metadata?.apiKey;
+    const expected = process.env.API_KEY;
+    if (!expected || typeof key !== 'string' || key !== expected) {
       throw new TxnError('UNAUTHENTICATED', 'Missing or invalid API key');
     }
     return true;

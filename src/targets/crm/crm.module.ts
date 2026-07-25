@@ -5,7 +5,7 @@ import { CrmTools } from './crm.tools.js';
  * @nitrostack/core never instantiates @Module-decorated classes (only their
  * static metadata is read at bootstrap), so registering CrmTools with the
  * compensator registry can't happen in a module constructor. See
- * CrmTools.onModuleInit (triggered from src/main.ts) for where that actually
+ * CrmTools.onModuleInit (triggered from src/index.ts) for where that actually
  * happens.
  */
 @Module({

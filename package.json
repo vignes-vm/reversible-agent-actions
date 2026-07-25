@@ -12,7 +12,8 @@
     "upgrade": "nitrostack-cli upgrade",
     "install:all": "nitrostack-cli install",
     "widget": "npm --prefix src/widgets",
-    "seed": "node --loader ts-node/esm fixtures/seed.ts",
+    "seed": "node --loader ts-node/esm fixtures/seed-production.ts",
+    "seed:dev": "node --loader ts-node/esm fixtures/seed.ts",
     "test:acceptance": "node --loader ts-node/esm fixtures/acceptance-tests.ts"
   },
   "keywords": [
@@ -38,6 +39,7 @@
   "devDependencies": {
     "@nitrostack/cli": "^1.0.15",
     "@types/better-sqlite3": "^7.6.13",
+    "@types/express": "^5.0.6",
     "@types/node": "^22.10.0",
     "@types/react": "^18.3.31",
     "@types/react-dom": "^18.3.7",

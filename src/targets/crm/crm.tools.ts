@@ -54,7 +54,7 @@ export class CrmTools implements OnModuleInit {
    * static metadata is read), so a module constructor can't perform this
    * registration. onModuleInit does run, but only if the bootstrap explicitly
    * calls triggerLifecycleHook(...) after McpApplicationFactory.create() — see
-   * src/main.ts.
+   * src/index.ts.
    */
   onModuleInit(): void {
     this.registry.registerFromClass(this.constructor);
