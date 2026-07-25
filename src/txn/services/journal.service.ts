@@ -77,13 +77,18 @@ export class JournalService {
     `);
   }
 
-  /** Inserts a new step, generating its id, compensationKey, and executedAt. */
-  append(data: Omit<Step, 'id' | 'executedAt' | 'compensationKey'>): Step {
+  /**
+   * Inserts a new step, generating its id and executedAt. compensationKey is
+   * generated too unless explicitly supplied — only fixtures/tests should ever
+   * pass one, to make seeded data deterministic; production callers (the
+   * interceptor) never do, preserving "generated at append, never at rollback."
+   */
+  append(data: Omit<Step, 'id' | 'executedAt' | 'compensationKey'> & { compensationKey?: string }): Step {
     const step: Step = {
       ...data,
       id: `step_${ulid()}`,
       executedAt: new Date(),
-      compensationKey: ulid(),
+      compensationKey: data.compensationKey ?? ulid(),
     };
 
     this.db

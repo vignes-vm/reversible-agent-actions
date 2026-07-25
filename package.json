@@ -11,7 +11,9 @@
     "start:prod": "nitrostack-cli start",
     "upgrade": "nitrostack-cli upgrade",
     "install:all": "nitrostack-cli install",
-    "widget": "npm --prefix src/widgets"
+    "widget": "npm --prefix src/widgets",
+    "seed": "node --loader ts-node/esm fixtures/seed.ts",
+    "test:acceptance": "node --loader ts-node/esm fixtures/acceptance-tests.ts"
   },
   "keywords": [
     "nitrostack",
@@ -39,6 +41,7 @@
     "@types/node": "^22.10.0",
     "@types/react": "^18.3.31",
     "@types/react-dom": "^18.3.7",
+    "ts-node": "^10.9.2",
     "typescript": "^5.3.3"
   },
   "nitrostack": {

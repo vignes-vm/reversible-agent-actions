@@ -16,6 +16,14 @@ interface Account {
   apiKeys: string[];
   createdAt: Date;
   updatedAt: Date;
+  /**
+   * Monotonic revision counter used as the optimistic-concurrency version
+   * instead of updatedAt: Date.toISOString() only has millisecond resolution,
+   * so two rapid sequential writes (routine under real load, not just in
+   * fast tests) can produce identical timestamps and make genuinely
+   * different versions compare as equal.
+   */
+  rev: number;
 }
 
 interface ApiKey {
@@ -76,6 +84,7 @@ export class CrmTools implements OnModuleInit {
       apiKeys: [],
       createdAt: now,
       updatedAt: now,
+      rev: 1,
     };
     this.accounts.set(account.id, account);
     return { id: account.id, name: account.name, domain: account.domain, tier: account.tier };
@@ -118,6 +127,7 @@ export class CrmTools implements OnModuleInit {
     const previousTier = account.tier;
     account.tier = input.tier;
     account.updatedAt = new Date();
+    account.rev++;
     return { accountId: account.id, newTier: account.tier, previousTier };
   }
 
@@ -142,6 +152,7 @@ export class CrmTools implements OnModuleInit {
     this.apiKeys.set(key.keyId, key);
     account.apiKeys.push(key.keyId);
     account.updatedAt = new Date();
+    account.rev++;
     return { keyId: key.keyId, scope: key.scope };
   }
 
@@ -159,6 +170,7 @@ export class CrmTools implements OnModuleInit {
       if (account) {
         account.apiKeys = account.apiKeys.filter((id) => id !== input.keyId);
         account.updatedAt = new Date();
+    account.rev++;
       }
       this.apiKeys.delete(input.keyId);
     }
@@ -180,7 +192,7 @@ export class CrmTools implements OnModuleInit {
       tier: account.tier,
       apiKeys: account.apiKeys,
       ref: `crm:account:${account.id}`,
-      version: account.updatedAt.toISOString(),
+      version: String(account.rev),
     };
   }
 

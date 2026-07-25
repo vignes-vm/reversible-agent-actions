@@ -58,121 +58,159 @@ export class RollbackOrchestrator {
     const total = steps.length;
     let done = 0;
 
+    // Tracks the version this rollback run itself has most recently observed
+    // for each resourceRef, seeded from each step's own forward-execution
+    // capture. A later (higher-seq, processed-earlier-in-LIFO) step's own
+    // compensation can legitimately touch a resource that an EARLIER step
+    // also declared a resourceRef for (e.g. granting then revoking an API key
+    // both bump the same account's version that an update_tier step also
+    // captured) — that must not be mistaken for external interference. This
+    // map is refreshed via a live read after every step (in the loop's
+    // `finally`, so it runs regardless of continue/break), always using the
+    // state as of BEFORE that step's own conflict check — never overwriting a
+    // resourceRef's baseline right before checking the very step that owns it,
+    // which would erase a genuine pre-existing external conflict.
+    const lastKnownVersion = new Map<string, string>();
+    const representativeStepByRef = new Map<string, Step>();
+    for (const s of steps) {
+      if (s.resourceRef) {
+        if (!representativeStepByRef.has(s.resourceRef)) representativeStepByRef.set(s.resourceRef, s);
+        if (s.resourceVersion && !lastKnownVersion.has(s.resourceRef)) {
+          lastKnownVersion.set(s.resourceRef, s.resourceVersion);
+        }
+      }
+    }
+
     // SEQUENTIAL LOOP (never Promise.all — order is a correctness requirement).
     for (const step of steps) {
-      options.onProgress?.(++done, total, `compensating ${step.toolName} on ${step.server}`);
-
-      // a. RE-CLASSIFY for decay (class is a function of time — §3.2).
-      const spec = this.registry.lookup(step.toolName);
-      const cls = this.classifier.classify({
-        spec,
-        prior: step.priorState,
-        at: step.executedAt,
-        now: new Date(),
-      });
-
-      // b. TERMINAL: skip and report.
-      if (cls === 'TERMINAL') {
-        this.journal.mark(step.id, 'SKIPPED_TERMINAL', spec?.manualInstruction);
-        emitEvent('txn.step.compensated', { txnId, seq: step.seq, outcome: 'IRREVERSIBLE', tool: step.toolName });
-        report.push({
-          seq: step.seq,
-          tool: step.toolName,
-          server: step.server,
-          outcome: 'IRREVERSIBLE',
-          note: 'Cannot be reversed.',
-          manualAction: spec?.manualInstruction ?? null,
-          residualTrace: false,
-        });
-        continue;
-      }
-
-      // c. CONFLICT DETECTION (if resourceVersion was captured).
-      if (step.resourceVersion && step.resourceRef) {
-        let conflictAbort = false;
-        try {
-          const current = await this.readCurrentVersion(step, spec);
-          if (current !== null && current !== step.resourceVersion) {
-            if (options.conflictPolicy === 'abort') {
-              this.journal.mark(step.id, 'COMPENSATION_FAILED', 'concurrent modification detected');
-              report.push({
-                seq: step.seq,
-                tool: step.toolName,
-                server: step.server,
-                outcome: 'CONFLICT',
-                note: 'Resource modified since capture.',
-                manualAction: 'Review and manually reconcile.',
-                residualTrace: false,
-              });
-              conflictAbort = true;
-            } else if (options.conflictPolicy === 'skip') {
-              report.push({
-                seq: step.seq,
-                tool: step.toolName,
-                server: step.server,
-                outcome: 'SKIPPED_CONFLICT',
-                note: 'Skipped due to conflict.',
-                manualAction: null,
-                residualTrace: false,
-              });
-              continue;
-            } else {
-              // 'force' falls through — log a loud warning.
-              console.warn('FORCE overwriting concurrent human edit', { step: step.id });
-            }
-          }
-        } catch {
-          // version check failed — proceed with compensation.
-        }
-        if (conflictAbort) break; // stop entirely — do not overwrite human work.
-      }
-
-      // d. DRY RUN: just report, don't invoke.
-      if (options.dryRun) {
-        report.push({
-          seq: step.seq,
-          tool: step.toolName,
-          server: step.server,
-          outcome: 'REVERSED',
-          note: '[DRY RUN] would reverse.',
-          manualAction: null,
-          residualTrace: cls === 'TOMBSTONED',
-        });
-        continue;
-      }
-
-      // e. COMPENSATE (idempotent via compensationKey).
-      this.journal.mark(step.id, 'COMPENSATING');
       try {
-        const args = spec!.argsFromOutput
-          ? spec!.argsFromOutput(step.output, step.input, step.priorState)
-          : (step.priorState ?? {});
-        await this.invokeCompensator(spec!.inverse!, args, step.compensationKey);
-        this.journal.mark(step.id, 'COMPENSATED');
-        emitEvent('txn.step.compensated', { txnId, seq: step.seq, outcome: 'REVERSED', tool: step.toolName });
-        const residual = cls === 'TOMBSTONED';
-        const note = residual ? 'Reversed — deletion marker remains visible.' : 'Reversed.';
-        report.push({
-          seq: step.seq,
-          tool: step.toolName,
-          server: step.server,
-          outcome: 'REVERSED',
-          note,
-          manualAction: null,
-          residualTrace: residual,
+        options.onProgress?.(++done, total, `compensating ${step.toolName} on ${step.server}`);
+
+        // a. RE-CLASSIFY for decay (class is a function of time — §3.2).
+        const spec = this.registry.lookup(step.toolName);
+        const cls = this.classifier.classify({
+          spec,
+          prior: step.priorState,
+          at: step.executedAt,
+          now: new Date(),
         });
-      } catch (err) {
-        this.journal.mark(step.id, 'COMPENSATION_FAILED', String(err));
-        emitEvent('txn.step.compensated', { txnId, seq: step.seq, outcome: 'FAILED', tool: step.toolName });
-        report.push({
-          seq: step.seq,
-          tool: step.toolName,
-          server: step.server,
-          outcome: 'FAILED',
-          note: String(err),
-          manualAction: 'Manual recovery required.',
-          residualTrace: false,
-        });
+
+        // b. TERMINAL: skip and report.
+        if (cls === 'TERMINAL') {
+          this.journal.mark(step.id, 'SKIPPED_TERMINAL', spec?.manualInstruction);
+          emitEvent('txn.step.compensated', { txnId, seq: step.seq, outcome: 'IRREVERSIBLE', tool: step.toolName });
+          report.push({
+            seq: step.seq,
+            tool: step.toolName,
+            server: step.server,
+            outcome: 'IRREVERSIBLE',
+            note: 'Cannot be reversed.',
+            manualAction: spec?.manualInstruction ?? null,
+            residualTrace: false,
+          });
+          continue;
+        }
+
+        // c. CONFLICT DETECTION (if resourceVersion was captured).
+        if (step.resourceVersion && step.resourceRef) {
+          let conflictAbort = false;
+          try {
+            const expected = lastKnownVersion.get(step.resourceRef) ?? step.resourceVersion;
+            const current = await this.readCurrentVersion(step, spec);
+            if (current !== null && current !== expected) {
+              if (options.conflictPolicy === 'abort') {
+                this.journal.mark(step.id, 'COMPENSATION_FAILED', 'concurrent modification detected');
+                report.push({
+                  seq: step.seq,
+                  tool: step.toolName,
+                  server: step.server,
+                  outcome: 'CONFLICT',
+                  note: 'Resource modified since capture.',
+                  manualAction: 'Review and manually reconcile.',
+                  residualTrace: false,
+                });
+                conflictAbort = true;
+              } else if (options.conflictPolicy === 'skip') {
+                report.push({
+                  seq: step.seq,
+                  tool: step.toolName,
+                  server: step.server,
+                  outcome: 'SKIPPED_CONFLICT',
+                  note: 'Skipped due to conflict.',
+                  manualAction: null,
+                  residualTrace: false,
+                });
+                continue;
+              } else {
+                // 'force' falls through — log a loud warning.
+                console.warn('FORCE overwriting concurrent human edit', { step: step.id });
+              }
+            }
+          } catch {
+            // version check failed — proceed with compensation.
+          }
+          if (conflictAbort) break; // stop entirely — do not overwrite human work.
+        }
+
+        // d. DRY RUN: just report, don't invoke.
+        if (options.dryRun) {
+          report.push({
+            seq: step.seq,
+            tool: step.toolName,
+            server: step.server,
+            outcome: 'REVERSED',
+            note: '[DRY RUN] would reverse.',
+            manualAction: null,
+            residualTrace: cls === 'TOMBSTONED',
+          });
+          continue;
+        }
+
+        // e. COMPENSATE (idempotent via compensationKey).
+        this.journal.mark(step.id, 'COMPENSATING');
+        try {
+          const args = spec!.argsFromOutput
+            ? spec!.argsFromOutput(step.output, step.input, step.priorState)
+            : (step.priorState ?? {});
+          await this.invokeCompensator(spec!.inverse!, args, step.compensationKey);
+          this.journal.mark(step.id, 'COMPENSATED');
+          emitEvent('txn.step.compensated', { txnId, seq: step.seq, outcome: 'REVERSED', tool: step.toolName });
+          const residual = cls === 'TOMBSTONED';
+          const note = residual ? 'Reversed — deletion marker remains visible.' : 'Reversed.';
+          report.push({
+            seq: step.seq,
+            tool: step.toolName,
+            server: step.server,
+            outcome: 'REVERSED',
+            note,
+            manualAction: null,
+            residualTrace: residual,
+          });
+        } catch (err) {
+          this.journal.mark(step.id, 'COMPENSATION_FAILED', String(err));
+          emitEvent('txn.step.compensated', { txnId, seq: step.seq, outcome: 'FAILED', tool: step.toolName });
+          report.push({
+            seq: step.seq,
+            tool: step.toolName,
+            server: step.server,
+            outcome: 'FAILED',
+            note: String(err),
+            manualAction: 'Manual recovery required.',
+            residualTrace: false,
+          });
+        }
+      } finally {
+        // Refresh every tracked resource's baseline for the NEXT iteration,
+        // using the state as it stands after whatever this step just did.
+        for (const [ref, repStep] of representativeStepByRef) {
+          try {
+            const repSpec = this.registry.lookup(repStep.toolName);
+            const fresh = await this.readCurrentVersion(repStep, repSpec);
+            if (fresh !== null) lastKnownVersion.set(ref, fresh);
+          } catch {
+            // leave the previous baseline in place if the refresh read fails.
+          }
+        }
       }
     }
 

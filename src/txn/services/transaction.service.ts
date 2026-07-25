@@ -64,10 +64,14 @@ export class TransactionService {
     `);
   }
 
-  /** Opens a new transaction with a generated 'txn_' prefixed id. */
-  open(params: { label: string; actor: string; scope: string[]; ttlSeconds: number }): Transaction {
+  /**
+   * Opens a new transaction with a generated 'txn_' prefixed id, unless an id
+   * is explicitly supplied — only fixtures/tests should do that, for
+   * deterministic seeded data; production callers (begin_transaction) never do.
+   */
+  open(params: { label: string; actor: string; scope: string[]; ttlSeconds: number; id?: string }): Transaction {
     const txn: Transaction = {
-      id: `txn_${ulid()}`,
+      id: params.id ?? `txn_${ulid()}`,
       label: params.label,
       actor: params.actor,
       scope: params.scope,
