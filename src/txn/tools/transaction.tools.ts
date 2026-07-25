@@ -1,4 +1,4 @@
-import { Injectable, ToolDecorator as Tool, UseGuards, Widget, Cache, z } from '@nitrostack/core';
+import { Injectable, ToolDecorator as Tool, UseGuards, Widget, Cache, emitEvent, z } from '@nitrostack/core';
 import type { ExecutionContext } from '@nitrostack/core';
 import { TransactionService } from '../services/transaction.service.js';
 import { JournalService } from '../services/journal.service.js';
@@ -8,15 +8,6 @@ import { CompensatorRegistry } from '../services/registry.service.js';
 import { TransactionContext } from '../services/transaction-context.service.js';
 import { ApiKeyGuard } from '../guards/api-key.guard.js';
 import { RollbackGuard } from '../guards/rollback.guard.js';
-
-/**
- * @nitrostack/core's public ExecutionContext type does not declare `emit` (its own
- * JSDoc examples use `ctx.emit(...)` regardless), but the framework attaches it at
- * runtime. See journal.interceptor.ts for the same accommodation.
- */
-interface EmittingContext extends ExecutionContext {
-  emit(event: string, payload: unknown): void;
-}
 
 const BeginTransactionSchema = z.object({
   label: z.string().min(3).describe('Human-readable intent, e.g. "onboard acme-corp". Appears in the audit trail.'),
@@ -89,7 +80,7 @@ export class TransactionTools {
       actor: ctx.auth?.subject ?? 'anonymous',
     });
     this.txnCtx.setActive(txn.id, txn.scope);
-    (ctx as EmittingContext).emit('txn.opened', { txnId: txn.id, label: txn.label, scope: txn.scope });
+    emitEvent('txn.opened', { txnId: txn.id, label: txn.label, scope: txn.scope });
     return {
       transactionId: txn.id,
       status: txn.status,
@@ -159,7 +150,7 @@ export class TransactionTools {
   @UseGuards(ApiKeyGuard)
   async commit(input: z.infer<typeof CommitTransactionSchema>, ctx: ExecutionContext) {
     const txn = this.txns.commit(input.transactionId);
-    (ctx as EmittingContext).emit('txn.committed', { txnId: input.transactionId });
+    emitEvent('txn.committed', { txnId: input.transactionId });
     return {
       transactionId: txn.id,
       status: txn.status,

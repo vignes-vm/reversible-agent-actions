@@ -1,28 +1,21 @@
-import { Injectable, Interceptor } from '@nitrostack/core';
+import { Injectable, Interceptor, emitEvent } from '@nitrostack/core';
 import type { ExecutionContext, InterceptorInterface } from '@nitrostack/core';
-import type { CapturedState, StepStatus } from '../types.js';
+import type { StepStatus } from '../types.js';
 import { JournalService } from '../services/journal.service.js';
 import { CompensatorRegistry } from '../services/registry.service.js';
 import { ReversibilityClassifier } from '../services/classifier.service.js';
 import { TransactionContext } from '../services/transaction-context.service.js';
 import { TxnError } from '../services/txn-error.js';
-
-/**
- * @nitrostack/core's public ExecutionContext type does not declare `input`, `invoke`,
- * or `emit` (its own JSDoc examples use `ctx.emit(...)` regardless), but the framework
- * attaches them at runtime for tool executions. This local extension documents the
- * shape this interceptor actually relies on.
- */
-interface ToolExecutionContext extends ExecutionContext {
-  input: unknown;
-  invoke(toolName: string, input: unknown): Promise<any>;
-  emit(event: string, payload: unknown): void;
-}
+import { journalCallStorage, type JournalCallState } from './journal-call-context.js';
 
 /**
  * Wraps every tool call executed inside a transaction with journaling: captures
  * prior state via pre-read before execution, classifies reversibility, and appends
  * an immutable step record — even when the wrapped call fails.
+ *
+ * Must be paired with @UsePipes(JournalCapturePipe) on the same tool method.
+ * This SDK's interceptors never receive tool input (only context, and the
+ * output of next()); only the Pipe stage sees input. See journal-call-context.ts.
  */
 @Injectable({ deps: [JournalService, CompensatorRegistry, ReversibilityClassifier, TransactionContext] })
 @Interceptor()
@@ -35,53 +28,50 @@ export class JournalInterceptor implements InterceptorInterface {
   ) {}
 
   async intercept(context: ExecutionContext, next: () => Promise<unknown>): Promise<unknown> {
-    const ctx = context as ToolExecutionContext;
-
     // INVARIANT 8: not in a transaction — pass through unchanged.
     const txnId = this.txnCtx.activeId;
     if (!txnId) return next();
 
-    const spec = this.registry.lookup(ctx.toolName ?? '');
+    const spec = this.registry.lookup(context.toolName ?? '');
 
     // SCOPE CHECK
     if (!this.txnCtx.scopeAllows(spec?.server)) {
       throw new TxnError(
         'SCOPE_VIOLATION',
-        `Tool ${ctx.toolName} (server: ${spec?.server}) is outside transaction scope`
+        `Tool ${context.toolName} (server: ${spec?.server}) is outside transaction scope`
       );
     }
 
-    // PRE-READ (THE MOST FORGOTTEN STEP) — must happen before execution, or
-    // RESTORATIVE steps have no prior value to classify or roll back against.
-    const captured: CapturedState = { value: null, ref: null, version: null };
-    if (spec?.requiresPreRead && spec.preReadTool && spec.preReadArgs) {
-      try {
-        const preReadInput = spec.preReadArgs(ctx.input);
-        const snap: any = await ctx.invoke(spec.preReadTool, preReadInput);
-        captured.value = snap?.value ?? snap;
-        captured.ref = snap?.ref ?? null;
-        captured.version = snap?.version ?? snap?.updatedAt ?? null;
-      } catch (err) {
-        ctx.logger.warn('Pre-read failed — step will classify as TERMINAL', {
-          tool: ctx.toolName,
-          error: String(err),
-        });
-        // do NOT throw — continue without captured state. The classifier handles it.
-      }
-    }
+    // Shared per-call state: JournalCapturePipe fills in `input` and performs the
+    // pre-read (THE MOST FORGOTTEN STEP) during the Pipe stage, which — per the
+    // real pipeline order — runs strictly before the handler executes.
+    const store: JournalCallState = {
+      spec,
+      input: undefined,
+      captured: { value: null, ref: null, version: null },
+      preReadWarning: null,
+    };
 
     // EXECUTE
     let output: unknown;
     let stepStatus: StepStatus = 'EXECUTED';
     try {
-      output = await next();
+      output = await journalCallStorage.run(store, () => next());
     } catch (err) {
       stepStatus = 'FAILED';
       output = { error: String(err) };
     }
 
+    if (store.preReadWarning) {
+      context.logger.warn(store.preReadWarning, { tool: context.toolName });
+    } else if (store.input === undefined) {
+      context.logger.warn('JournalCapturePipe not applied to this tool — input was not captured', {
+        tool: context.toolName,
+      });
+    }
+
     // CLASSIFY
-    const reversibility = this.classifier.classify({ spec, prior: captured.value, at: new Date() });
+    const reversibility = this.classifier.classify({ spec, prior: store.captured.value, at: new Date() });
 
     // APPEND (always — even on failure — INVARIANT 2)
     const seq = this.journal.nextSeq(txnId);
@@ -89,12 +79,14 @@ export class JournalInterceptor implements InterceptorInterface {
       txnId,
       seq,
       server: spec?.server ?? 'unknown',
-      toolName: ctx.toolName ?? '',
-      input: ctx.input,
+      toolName: context.toolName ?? '',
+      // store.input stays undefined if JournalCapturePipe wasn't applied to this
+      // tool; append() must never fail (INVARIANT 2), so fall back to null.
+      input: store.input ?? null,
       output,
-      priorState: captured.value,
-      resourceRef: captured.ref,
-      resourceVersion: captured.version,
+      priorState: store.captured.value,
+      resourceRef: store.captured.ref,
+      resourceVersion: store.captured.version,
       reversibility,
       status: stepStatus,
       compensationNote: null,
@@ -106,7 +98,13 @@ export class JournalInterceptor implements InterceptorInterface {
     }
 
     // EMIT
-    ctx.emit('txn.step.recorded', { txnId, seq, tool: ctx.toolName, class: reversibility, status: stepStatus });
+    emitEvent('txn.step.recorded', {
+      txnId,
+      seq,
+      tool: context.toolName,
+      class: reversibility,
+      status: stepStatus,
+    });
 
     if (stepStatus === 'FAILED') {
       throw new Error((output as { error: string }).error);

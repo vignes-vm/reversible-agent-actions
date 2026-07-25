@@ -1,4 +1,4 @@
-import { Injectable } from '@nitrostack/core';
+import { Injectable, emitEvent } from '@nitrostack/core';
 import type {
   CompensatorSpec,
   RollbackOptions,
@@ -74,6 +74,7 @@ export class RollbackOrchestrator {
       // b. TERMINAL: skip and report.
       if (cls === 'TERMINAL') {
         this.journal.mark(step.id, 'SKIPPED_TERMINAL', spec?.manualInstruction);
+        emitEvent('txn.step.compensated', { txnId, seq: step.seq, outcome: 'IRREVERSIBLE', tool: step.toolName });
         report.push({
           seq: step.seq,
           tool: step.toolName,
@@ -148,6 +149,7 @@ export class RollbackOrchestrator {
           : (step.priorState ?? {});
         await this.invokeCompensator(spec!.inverse!, args, step.compensationKey);
         this.journal.mark(step.id, 'COMPENSATED');
+        emitEvent('txn.step.compensated', { txnId, seq: step.seq, outcome: 'REVERSED', tool: step.toolName });
         const residual = cls === 'TOMBSTONED';
         const note = residual ? 'Reversed — deletion marker remains visible.' : 'Reversed.';
         report.push({
@@ -161,6 +163,7 @@ export class RollbackOrchestrator {
         });
       } catch (err) {
         this.journal.mark(step.id, 'COMPENSATION_FAILED', String(err));
+        emitEvent('txn.step.compensated', { txnId, seq: step.seq, outcome: 'FAILED', tool: step.toolName });
         report.push({
           seq: step.seq,
           tool: step.toolName,
@@ -182,6 +185,8 @@ export class RollbackOrchestrator {
     // BUILD AND RETURN THE HONEST REPORT.
     const reversed = report.filter((r) => r.outcome === 'REVERSED');
     const notReversed = report.filter((r) => r.outcome !== 'REVERSED');
+
+    emitEvent('txn.rollback.finished', { txnId, status: finalStatus, reversed, notReversed });
 
     return {
       transactionId: txnId,
