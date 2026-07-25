@@ -2,6 +2,7 @@
 
 import { WidgetLayout } from '@nitrostack/widgets';
 import 'mapbox-gl/dist/mapbox-gl.css';
+import './globals.css';
 
 export default function RootLayout({
     children,
