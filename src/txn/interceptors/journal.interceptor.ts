@@ -6,6 +6,7 @@ import { CompensatorRegistry } from '../services/registry.service.js';
 import { ReversibilityClassifier } from '../services/classifier.service.js';
 import { TransactionContext } from '../services/transaction-context.service.js';
 import { TxnError } from '../services/txn-error.js';
+import type { ToolExecutor } from '../services/rollback.service.js';
 import { journalCallStorage, type JournalCallState } from './journal-call-context.js';
 
 /**
@@ -20,12 +21,24 @@ import { journalCallStorage, type JournalCallState } from './journal-call-contex
 @Injectable({ deps: [JournalService, CompensatorRegistry, ReversibilityClassifier, TransactionContext] })
 @Interceptor()
 export class JournalInterceptor implements InterceptorInterface {
+  private toolExecutor?: ToolExecutor;
+
   constructor(
     private readonly journal: JournalService,
     private readonly registry: CompensatorRegistry,
     private readonly classifier: ReversibilityClassifier,
     private readonly txnCtx: TransactionContext
   ) {}
+
+  /**
+   * Wires in the tool invocation mechanism used to re-read a resource's version
+   * immediately after a successful write (see the post-execution re-read below
+   * for why this can't just reuse the pre-execution capture). Call once at boot,
+   * with the same executor passed to JournalCapturePipe.setToolExecutor.
+   */
+  setToolExecutor(executor: ToolExecutor): void {
+    this.toolExecutor = executor;
+  }
 
   async intercept(context: ExecutionContext, next: () => Promise<unknown>): Promise<unknown> {
     // INVARIANT 8: not in a transaction — pass through unchanged.
@@ -68,6 +81,24 @@ export class JournalInterceptor implements InterceptorInterface {
       context.logger.warn('JournalCapturePipe not applied to this tool — input was not captured', {
         tool: context.toolName,
       });
+    }
+
+    // POST-EXECUTION VERSION RE-READ. The Pipe's pre-read runs before the
+    // handler, so its captured version is the resource's version *before* this
+    // step's own write — comparing that against a fresh read at rollback time
+    // would always look "conflicted" even with zero concurrent interference,
+    // since this step's own write is what changed it. Re-read once more, now,
+    // so resourceVersion reflects the state immediately after this step wrote,
+    // which is the correct baseline for detecting *later* concurrent changes.
+    if (stepStatus === 'EXECUTED' && spec?.requiresPreRead && spec.preReadTool && spec.preReadArgs && this.toolExecutor) {
+      try {
+        const postReadInput = spec.preReadArgs(store.input);
+        const snap: any = await this.toolExecutor(spec.preReadTool, postReadInput, `post-read:${spec.toolName}`);
+        store.captured.ref = snap?.ref ?? store.captured.ref;
+        store.captured.version = snap?.version ?? snap?.updatedAt ?? store.captured.version;
+      } catch {
+        // leave the pre-execution capture as a fallback.
+      }
     }
 
     // CLASSIFY
