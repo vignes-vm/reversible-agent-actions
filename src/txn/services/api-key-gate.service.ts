@@ -1,5 +1,6 @@
 import { Injectable, createAPIKeyAuth } from '@nitrostack/core';
 import type { NitroStackServer } from '@nitrostack/core';
+import type { NextFunction, Request, Response } from 'express';
 
 /**
  * Gates the MCP HTTP transport (the deployed NitroCloud endpoint) behind
@@ -29,12 +30,21 @@ export class ApiKeyGateService {
     if (!apiKey || !this.server) return;
     const app = this.server.getHttpTransport()?.getApp?.();
     if (!app) return;
-    app.use(
-      '/mcp',
-      createAPIKeyAuth({
-        keys: [apiKey],
-        headerName: 'X-API-Key',
-      })
-    );
+    const requireKey = createAPIKeyAuth({
+      keys: [apiKey],
+      headerName: 'X-API-Key',
+    });
+    // /mcp/health is @nitrostack/core's own liveness endpoint (see
+    // streamable-http.js), which NitroCloud's deployment pipeline polls to
+    // decide whether the rollout succeeded — it has no way to send our
+    // X-API-Key header. Gating it too made every deploy get marked "failed"
+    // even though the app itself started fine, since the platform's own
+    // health check was getting a 401. Express strips the '/mcp' mount prefix
+    // before this middleware sees req.path, so a request to /mcp/health
+    // arrives here as '/health'.
+    app.use('/mcp', (req: Request, res: Response, next: NextFunction) => {
+      if (req.path === '/health') return next();
+      return requireKey(req, res, next);
+    });
   }
 }
