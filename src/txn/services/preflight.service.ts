@@ -22,7 +22,7 @@ export interface PreflightResult {
 const CLASS_ORDER: ReversibilityClass[] = ['CLEAN', 'RESTORATIVE', 'TOMBSTONED', 'MITIGABLE', 'TERMINAL'];
 
 /** Analyses a planned sequence of tool calls for reversibility risk before execution. */
-@Injectable()
+@Injectable({ deps: [CompensatorRegistry] })
 export class PreflightPlanner {
   constructor(
     private registry: CompensatorRegistry,
