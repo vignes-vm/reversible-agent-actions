@@ -14,6 +14,13 @@ import { TxnError } from '../services/txn-error.js';
  * rejected every call unconditionally, authenticated or not. Callers must
  * pass `_meta: { apiKey }` alongside their normal tool arguments for this
  * guard to see it — same mechanism RollbackGuard uses for transactionId.
+ *
+ * NOT currently wired to any live @Tool (see transaction.tools.ts): no real
+ * MCP client (NitroStudio, Claude Desktop, etc.) gives the calling agent a
+ * way to set `_meta` on a tool call, so using this as a live @UseGuards
+ * blocked every real caller unconditionally. The real HTTP-transport-level
+ * gate is ApiKeyGateService. Kept here as intended per-call logic / for its
+ * unit test.
  */
 @Injectable()
 export class ApiKeyGuard implements Guard {

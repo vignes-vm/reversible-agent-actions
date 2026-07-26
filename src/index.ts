@@ -9,6 +9,7 @@ import { JournalInterceptor } from './txn/interceptors/journal.interceptor.js';
 import { JournalCapturePipe } from './txn/pipes/journal-capture.pipe.js';
 import { TransactionContext } from './txn/services/transaction-context.service.js';
 import { ServerInfo } from './txn/services/server-info.service.js';
+import { ApiKeyGateService } from './txn/services/api-key-gate.service.js';
 
 // McpApplicationFactory reads @Module metadata from whatever class `module`
 // points to (AppModule) — the class @McpApp itself decorates doesn't need its
@@ -108,6 +109,12 @@ async function bootstrap() {
   // server-info.service.ts) — the server object itself only exists once
   // create() returns, so a Tool method can't reach it any other way.
   container.resolve(ServerInfo).setServer(app);
+
+  // ApiKeyGateService mounts its Express middleware from an
+  // onApplicationBootstrap hook fired *inside* app.start() — before the HTTP
+  // transport registers its /mcp routes — so setServer() must run before
+  // app.start(), same as ServerInfo above.
+  container.resolve(ApiKeyGateService).setServer(app);
 
   await app.start();
 

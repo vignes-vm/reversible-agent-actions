@@ -42,7 +42,7 @@ export interface NormalizedStep {
 }
 
 export interface NormalizedView {
-  kind: 'transaction' | 'rollback' | 'preflight';
+  kind: 'transaction' | 'rollback' | 'preflight' | 'error';
   transactionId: string | null;
   label: string | null;
   actor: string | null;
@@ -55,6 +55,8 @@ export interface NormalizedView {
   systemsTouched: number;
   /** Drives the intervention panel; only ever populated for a RollbackReport. */
   notReversed: StepReport[] | null;
+  /** Set only for kind: 'error' — the raw message to show. */
+  errorMessage?: string;
 }
 
 function isGetTransactionResult(data: TxnTimelineData): data is GetTransactionResult {
@@ -188,5 +190,28 @@ export function normalize(data: TxnTimelineData): NormalizedView {
     };
   }
 
-  throw new Error('Unrecognized txn-timeline widget data shape');
+  // Anything else — most commonly a TxnExceptionFilter error response
+  // ({ isError: true, code, message, report }), e.g. TXN_NOT_FOUND from
+  // get_transaction on a bad id — renders as a clean error state instead of
+  // crashing the whole widget. `report` (a RollbackReport), when present, is
+  // still shown via the normal rollback view.
+  const maybeError = data as { isError?: boolean; code?: string; message?: string; report?: RollbackReport | null };
+  if (maybeError?.report) {
+    return normalize(maybeError.report);
+  }
+  return {
+    kind: 'error',
+    transactionId: null,
+    label: null,
+    actor: null,
+    openedAt: null,
+    scope: null,
+    status: null,
+    steps: [],
+    pivotSeq: null,
+    summary: '',
+    systemsTouched: 0,
+    notReversed: null,
+    errorMessage: maybeError?.message ?? maybeError?.code ?? 'Unrecognized response from the server.',
+  };
 }

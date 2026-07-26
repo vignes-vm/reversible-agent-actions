@@ -1,4 +1,4 @@
-import { Injectable, ToolDecorator as Tool, UseGuards, UseFilters, Widget, Cache, emitEvent, z } from '@nitrostack/core';
+import { Injectable, ToolDecorator as Tool, UseFilters, Widget, Cache, emitEvent, z } from '@nitrostack/core';
 import type { ExecutionContext } from '@nitrostack/core';
 import { TransactionService } from '../services/transaction.service.js';
 import { JournalService } from '../services/journal.service.js';
@@ -6,9 +6,31 @@ import { RollbackOrchestrator } from '../services/rollback.service.js';
 import { PreflightPlanner } from '../services/preflight.service.js';
 import { CompensatorRegistry } from '../services/registry.service.js';
 import { TransactionContext } from '../services/transaction-context.service.js';
-import { ApiKeyGuard } from '../guards/api-key.guard.js';
-import { RollbackGuard } from '../guards/rollback.guard.js';
 import { TxnExceptionFilter } from '../filters/txn-exception.filter.js';
+
+/**
+ * ApiKeyGuard/RollbackGuard are deliberately NOT wired here with @UseGuards.
+ *
+ * Both require data no real MCP client has a way to attach: ApiKeyGuard needs
+ * ctx.metadata.apiKey and RollbackGuard needs ctx.metadata.transactionId, both
+ * sourced from MCP request `_meta` — but `_meta` is protocol-level metadata a
+ * client library populates, not something a calling agent (or NitroStudio,
+ * Claude Desktop, etc.) can set per tool call. Wiring them as guards made
+ * every one of these tools permanently fail with UNAUTHENTICATED for every
+ * real client, confirmed by testing against a live NitroStudio connection.
+ *
+ * ExecutionContext.auth is never populated by this SDK for any transport
+ * either (confirmed: zero references to `.auth` in server.js) — even
+ * OAuthModule's real auth middleware only gates the HTTP request before it
+ * reaches the MCP layer (req.auth), it never bridges into a tool's
+ * ExecutionContext. So there is no per-call caller identity available to any
+ * tool handler without building a full OAuth flow, which is out of scope here.
+ *
+ * The actual, working security boundary is at the HTTP transport level (see
+ * attachApiKeyMiddleware in src/index.ts) — it protects the deployed server
+ * from the public internet without blocking any real client's normal tool
+ * calls, matching how OAuthModule itself works.
+ */
 
 const BeginTransactionSchema = z.object({
   label: z.string().min(3).describe('Human-readable intent, e.g. "onboard acme-corp". Appears in the audit trail.'),
@@ -72,7 +94,6 @@ export class TransactionTools {
     inputSchema: BeginTransactionSchema,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
   })
-  @UseGuards(ApiKeyGuard)
   @UseFilters(TxnExceptionFilter)
   async begin(input: z.infer<typeof BeginTransactionSchema>, ctx: ExecutionContext) {
     const txn = this.txns.open({
@@ -130,7 +151,6 @@ export class TransactionTools {
     // opt in via taskSupport on @Tool instead.
     taskSupport: 'optional',
   })
-  @UseGuards(ApiKeyGuard, RollbackGuard)
   @Widget('txn-timeline')
   @UseFilters(TxnExceptionFilter)
   async rollback(input: z.infer<typeof RollbackTransactionSchema>, ctx: ExecutionContext) {
@@ -151,7 +171,6 @@ export class TransactionTools {
     inputSchema: CommitTransactionSchema,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
   })
-  @UseGuards(ApiKeyGuard)
   @UseFilters(TxnExceptionFilter)
   async commit(input: z.infer<typeof CommitTransactionSchema>, ctx: ExecutionContext) {
     const txn = this.txns.commit(input.transactionId);

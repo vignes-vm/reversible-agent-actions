@@ -12,6 +12,7 @@ import { PreflightPlanner } from './services/preflight.service.js';
 import { TxnAuditListener } from './services/audit.service.js';
 import { TransactionContext } from './services/transaction-context.service.js';
 import { ServerInfo } from './services/server-info.service.js';
+import { ApiKeyGateService } from './services/api-key-gate.service.js';
 
 /**
  * @nitrostack/core's ModuleMetadata has no `interceptors`/`filters` keys — those
@@ -38,6 +39,7 @@ import { ServerInfo } from './services/server-info.service.js';
     TxnAuditListener,
     TransactionContext,
     ServerInfo,
+    ApiKeyGateService,
   ],
   exports: [CompensatorRegistry, JournalService],
 })

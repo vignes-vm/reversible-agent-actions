@@ -14,6 +14,13 @@ import { TxnError } from '../services/txn-error.js';
  * ctx.metadata) rather than the tool's normal input schema. Callers of
  * rollback_transaction must pass `_meta: { transactionId }` alongside the usual
  * arguments for this guard to see which transaction is being targeted.
+ *
+ * NOT currently wired to any live @Tool (see transaction.tools.ts): no real
+ * MCP client can set `_meta` on a tool call, and ctx.auth is never populated
+ * by @nitrostack/core for any transport, so this guard was permanently
+ * unreachable in a passable state through real usage. Kept as intended
+ * per-call authorization logic and covered by its own unit test
+ * (fixtures/acceptance-tests.ts TEST 7).
  */
 @Injectable()
 export class RollbackGuard implements Guard {

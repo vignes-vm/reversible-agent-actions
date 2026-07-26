@@ -48,6 +48,17 @@ function TxnTimeline({ data }: TxnTimelineProps) {
 
   const sortedSteps = useMemo(() => [...view.steps].sort((a, b) => a.seq - b.seq), [view.steps]);
 
+  if (view.kind === 'error') {
+    return (
+      <div className="w-full max-w-3xl mx-auto p-4 rounded-xl bg-white dark:bg-gray-950 font-sans">
+        <div className="p-3 rounded-lg bg-red-50 dark:bg-red-950 border-2 border-red-400 text-[13px] text-red-700 dark:text-red-300">
+          <span className="font-bold">Couldn't render this transaction: </span>
+          {view.errorMessage}
+        </div>
+      </div>
+    );
+  }
+
   const isRollingBack = view.status === 'ROLLING_BACK';
   const compensatedStates = new Set(['COMPENSATED', 'COMPENSATION_FAILED', 'SKIPPED_TERMINAL', 'SKIPPED_CONFLICT']);
   const doneCount = sortedSteps.filter((s) => s.compensationState && compensatedStates.has(s.compensationState)).length;

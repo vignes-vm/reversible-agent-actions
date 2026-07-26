@@ -307,6 +307,10 @@ async function main() {
   });
 
   // TEST 7 — non-owner, non-operator cannot rollback.
+  // RollbackGuard is exercised directly here, not through rollback_transaction
+  // itself: no real MCP client can populate ctx.metadata/ctx.auth, so the
+  // guard is no longer wired to the live tool (see transaction.tools.ts). This
+  // still validates the guard's own ownership/role logic in isolation.
   await runTest(7, 'Non-owner without operator role cannot rollback', async () => {
     const h = makeHarness();
     const txn = h.txns.open({ label: 'test7', actor: 'agent:alice', scope: ['crm'], ttlSeconds: 3600 });
