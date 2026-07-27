@@ -14,7 +14,6 @@ Built as an MCP server on [NitroStack](https://nitrostack.ai), with a live timel
 <p align="center">
   <img alt="status" src="https://img.shields.io/badge/tests-7%2F7%20passing-brightgreen">
   <img alt="tools" src="https://img.shields.io/badge/MCP%20tools-25-blue">
-  <img alt="license" src="https://img.shields.io/badge/license-MIT-lightgrey">
   <img alt="node" src="https://img.shields.io/badge/node-%3E%3D18-339933">
 </p>
 
@@ -185,8 +184,4 @@ scale-to-zero cold starts.
 npm run build   # tsc + widget bundle
 npm start       # nitrostack-cli start — dist/index.js, dual transport
 ```
-
-## License
-
-MIT
 
