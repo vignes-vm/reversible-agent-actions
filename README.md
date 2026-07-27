@@ -151,28 +151,6 @@ whether it needs a pre-read to capture prior state before writing.
 | `registry://taxonomy` | The five-class taxonomy explained, in Markdown. |
 | `safe_multi_step_plan` (prompt) | Guides an agent through preflight → open → execute → commit/rollback for any multi-step write operation. |
 
-## Architecture
-
-```
-src/
-  index.ts                    bootstrap: dual transport, DI wiring, warm-up route
-  txn/
-    types.ts                  the entire domain vocabulary — nothing else redefines these types
-    services/                 journal, transaction lifecycle, registry, classifier, rollback orchestrator
-    interceptors/ pipes/      journal every tool call transparently (pre-read → execute → classify → append)
-    guards/ filters/          API key + ownership auth, structured error responses
-    tools/ resources/ prompts/  the MCP surface
-  targets/
-    crm/ messaging/ billing/  the three example target systems, each @Compensatable-annotated
-widgets/txn-timeline/         the live rollback timeline (Tailwind + React), outside src/ by NitroStack convention
-fixtures/
-  seed.ts / seed-production.ts   deterministic demo transaction (7 steps, hardcoded compensation keys)
-  acceptance-tests.ts             7 scenarios, PASS/FAIL, exit 0/1
-```
-
-**Everything is journaled, nothing is assumed reversible by default.** A step with no registered
-compensator classifies `TERMINAL` — the safe default is "can't be undone," not "probably fine."
-
 ## Deploying
 
 `NODE_ENV=production` switches the server to dual HTTP+stdio transport automatically (binding
