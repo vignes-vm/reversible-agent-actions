@@ -111,7 +111,7 @@ npm run dev
 # Seed the demo transaction (onboard acme-corp: 7 steps across CRM/messaging/billing)
 npm run seed:dev
 
-# Run the acceptance suite (7 scenarios: happy path, conflict detection,
+# Run the acceptance suite (7/7 passing scenarios: happy path, conflict detection,
 # broken compensator, idempotent rollback, non-owner rejection, ...)
 npm run test:acceptance
 ```
