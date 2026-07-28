@@ -28,7 +28,7 @@ can be deleted, but the deletion itself is visible. If step six fails, what happ
 two, and four? Silently leaving them in place is wrong. Blindly "rolling back" by pretending
 everything is undoable is worse — it's a false promise.
 
-This project treats reversibility as a first-class property of every action, not an afterthought.
+In this project, reversibility is built into every action from the start, rather than added as an afterthought.
 
 ## The five-class taxonomy
 
